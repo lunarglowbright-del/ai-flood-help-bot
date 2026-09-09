@@ -1,0 +1,13 @@
+{
+  "name": "flood-emergency-line-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LINE Official Account chatbot for flood emergency assistance",
+  "engines": {
+    "node": ">=18.x"
+  },
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {}
+}
