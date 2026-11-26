@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 export const DEFAULT_REPLY =
   "ขออภัยครับ ขณะนี้ไม่มีข้อมูลในเรื่องนี้ หากเป็นกรณีเร่งด่วนหรือเสี่ยงอันตราย กรุณาโทร 1784 (กรมป้องกันและบรรเทาสาธารณภัย) หรือ 191 ทันทีครับ";
 
-const MODEL = "gemini-3.5-flash";
+const MODEL = "gemini-3.5-flash-lite";
 const REQUEST_TIMEOUT_MS = 8_000;
 
 function errorDetails(error: unknown): { message: string; status: number | null } {

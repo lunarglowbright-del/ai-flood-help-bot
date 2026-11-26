@@ -1,7 +1,7 @@
 # AI Chatbot - Flood Help LINE Bot
 
 Next.js 16 App Router webhook that answers Thai flood-relief questions using a
-verified FAQ CSV and Gemini (`gemini-3.5-flash`).
+verified FAQ CSV and Gemini (`gemini-3.5-flash-lite`).
 
 ## Requirements
 
