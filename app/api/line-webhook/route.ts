@@ -1,6 +1,6 @@
 import { LineBotClient, validateSignature } from "@line/bot-sdk";
 import { DEFAULT_REPLY, askGemini } from "@/lib/gemini";
-import { findNearestServices } from "@/lib/locations";
+import { findNearestServices, formatNearbyServices } from "@/lib/locations";
 import { getFaqCsv } from "@/lib/sheet";
 
 export const runtime = "nodejs";
@@ -10,7 +10,6 @@ const HANDLER_DEADLINE_MS = 10_000;
 const REPLY_RESERVE_MS = 1_000;
 const LOCATION_REQUEST_REPLY =
   "กรุณาแชร์ตำแหน่งปัจจุบันผ่าน LINE โดยแตะ + แล้วเลือก Location ครับ ผมจะค้นหาจุดใกล้ที่สุดแยกตามประเภทให้ โดยระยะทางเป็นระยะเส้นตรง ไม่ใช่ระยะตามถนนครับ";
-const URGENT_REPLY_WITH_LOCATION = `${DEFAULT_REPLY}\n\nหากปลอดภัย กรุณาแชร์ตำแหน่งปัจจุบันผ่าน LINE โดยแตะ + แล้วเลือก Location เพื่อค้นหาจุดช่วยเหลือใกล้คุณครับ`;
 
 let lineClient: LineBotClient | null = null;
 
@@ -185,15 +184,7 @@ async function createNearbyReply(
       return DEFAULT_REPLY;
     }
 
-    const serviceLines = result.services.map((service) => {
-      const location = [service.address, service.area, service.province]
-        .filter(Boolean)
-        .join(" ");
-      const phone = service.phone ? ` โทร ${service.phone}` : "";
-      return `${service.category}: ${service.name} (${service.distanceKm.toFixed(1)} กม.)${location ? ` ที่อยู่ ${location}` : ""}${phone}`;
-    });
-
-    return `จุดช่วยเหลือที่ใกล้ตำแหน่งของคุณที่สุดแยกตามประเภทครับ\n${serviceLines.join("\n")}\n\nระยะทางเป็นเส้นตรง ไม่ใช่ระยะทางตามถนนครับ`;
+    return formatNearbyServices(result.services);
   } catch (error) {
     console.error(
       JSON.stringify({
@@ -260,7 +251,7 @@ export async function POST(request: Request): Promise<Response> {
           deadline
         );
       } else if (isUrgentRequest(messageEvent.text)) {
-        reply = URGENT_REPLY_WITH_LOCATION;
+        reply = DEFAULT_REPLY;
       } else if (isNearbyRequest(messageEvent.text)) {
         reply = LOCATION_REQUEST_REPLY;
       } else {

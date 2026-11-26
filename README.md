@@ -17,7 +17,8 @@ category.
 Only put information and coordinates verified by the response team in the
 sheet. Latitude and longitude must be decimal degrees. Distances are straight
 line estimates, not driving or walking directions. If the sheet or model
-cannot provide a reliable answer, the bot returns the emergency fallback.
+cannot provide a reliable answer, the bot returns a greeting, asks the user to
+share a location if it is safe, and provides emergency numbers.
 
 ## Run locally
 
@@ -35,8 +36,8 @@ The directory CSV is cached in memory for 60 seconds. A failed refresh uses
 the last cached CSV; if no cached data exists, the bot replies with the
 emergency fallback without calling Gemini. Ask for the nearest service by
 mentioning "ใกล้" or share a LINE location directly. In an urgent message the
-bot replies with emergency numbers and asks the user to share their location
-if it is safe to do so.
+bot uses the same default message: it provides emergency numbers and asks the
+user to share their location if it is safe to do so.
 
 ## Deploy to Vercel
 

@@ -184,3 +184,20 @@ export function findNearestServices(
     skippedCoordinateRows
   };
 }
+
+export function formatNearbyServices(services: NearbyService[]): string {
+  const serviceLines = services.map((service, index) => {
+    const address =
+      service.address || [service.area, service.province].filter(Boolean).join(" ");
+
+    return [
+      `${index + 1}. ${service.category}`,
+      `สถานที่: ${service.name}`,
+      `ระยะห่างโดยตรง: ${service.distanceKm.toFixed(1)} กิโลเมตร`,
+      ...(address ? [`ที่อยู่: ${address}`] : []),
+      ...(service.phone ? [`โทร: ${service.phone}`] : [])
+    ].join("\n");
+  });
+
+  return `จุดช่วยเหลือใกล้ตำแหน่งของคุณ\n\n${serviceLines.join("\n\n")}\n\nหมายเหตุ: ระยะทางเป็นเส้นตรง ไม่ใช่ระยะทางตามถนนครับ`;
+}
