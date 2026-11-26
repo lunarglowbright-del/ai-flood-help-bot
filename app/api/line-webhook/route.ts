@@ -1,5 +1,6 @@
 import { LineBotClient, validateSignature } from "@line/bot-sdk";
 import { DEFAULT_REPLY, askGemini } from "@/lib/gemini";
+import { findNearestServices } from "@/lib/locations";
 import { getFaqCsv } from "@/lib/sheet";
 
 export const runtime = "nodejs";
@@ -7,13 +8,26 @@ export const maxDuration = 30;
 
 const HANDLER_DEADLINE_MS = 10_000;
 const REPLY_RESERVE_MS = 1_000;
+const LOCATION_REQUEST_REPLY =
+  "กรุณาแชร์ตำแหน่งปัจจุบันผ่าน LINE โดยแตะ + แล้วเลือก Location ครับ ผมจะค้นหาจุดใกล้ที่สุดแยกตามประเภทให้ โดยระยะทางเป็นระยะเส้นตรง ไม่ใช่ระยะตามถนนครับ";
+const URGENT_REPLY_WITH_LOCATION = `${DEFAULT_REPLY}\n\nหากปลอดภัย กรุณาแชร์ตำแหน่งปัจจุบันผ่าน LINE โดยแตะ + แล้วเลือก Location เพื่อค้นหาจุดช่วยเหลือใกล้คุณครับ`;
 
 let lineClient: LineBotClient | null = null;
 
 type LineTextMessageEvent = {
   replyToken: string;
+  messageType: "text";
   text: string;
 };
+
+type LineLocationMessageEvent = {
+  replyToken: string;
+  messageType: "location";
+  latitude: number;
+  longitude: number;
+};
+
+type LineMessageEvent = LineTextMessageEvent | LineLocationMessageEvent;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -40,21 +54,53 @@ function jsonResponse(body: { ok: boolean }, status = 200): Response {
   });
 }
 
-function getTextMessageEvent(value: unknown): LineTextMessageEvent | null {
+function getMessageEvent(value: unknown): LineMessageEvent | null {
   if (!isRecord(value) || value.type !== "message" || !isRecord(value.message)) {
     return null;
   }
 
-  if (
-    value.message.type !== "text" ||
-    typeof value.message.text !== "string" ||
-    typeof value.replyToken !== "string" ||
-    !value.replyToken
-  ) {
+  if (typeof value.replyToken !== "string" || !value.replyToken) {
     return null;
   }
 
-  return { replyToken: value.replyToken, text: value.message.text };
+  if (value.message.type === "text" && typeof value.message.text === "string") {
+    return {
+      replyToken: value.replyToken,
+      messageType: "text",
+      text: value.message.text
+    };
+  }
+
+  if (
+    value.message.type === "location" &&
+    typeof value.message.latitude === "number" &&
+    Number.isFinite(value.message.latitude) &&
+    value.message.latitude >= -90 &&
+    value.message.latitude <= 90 &&
+    typeof value.message.longitude === "number" &&
+    Number.isFinite(value.message.longitude) &&
+    value.message.longitude >= -180 &&
+    value.message.longitude <= 180
+  ) {
+    return {
+      replyToken: value.replyToken,
+      messageType: "location",
+      latitude: value.message.latitude,
+      longitude: value.message.longitude
+    };
+  }
+
+  return null;
+}
+
+function isUrgentRequest(text: string): boolean {
+  return /(ช่วยด้วย|ช่วยฉัน|ฉุกเฉิน|ด่วน|อันตราย|ติดอยู่|จมน้ำ|หนีน้ำ|น้ำกำลังเข้าบ้าน)/i.test(
+    text
+  );
+}
+
+function isNearbyRequest(text: string): boolean {
+  return /(ใกล้|แถวนี้|บริเวณนี้|พิกัด|location|โลเคชัน)/i.test(text);
 }
 
 async function replySafely(replyToken: string, text: string): Promise<void> {
@@ -111,6 +157,54 @@ async function createReply(text: string, deadline: number): Promise<string> {
   }
 }
 
+async function createNearbyReply(
+  latitude: number,
+  longitude: number,
+  deadline: number
+): Promise<string> {
+  try {
+    const sheetTimeout = Math.max(
+      0,
+      Math.min(3_000, deadline - Date.now() - REPLY_RESERVE_MS)
+    );
+    if (sheetTimeout === 0) {
+      throw new Error("Webhook deadline exceeded before fetching the service directory");
+    }
+
+    const csv = await getFaqCsv(sheetTimeout);
+    const result = findNearestServices(csv, latitude, longitude);
+    console.log(
+      JSON.stringify({
+        event: "nearby_search",
+        resultCount: result.services.length,
+        skippedCoordinateRows: result.skippedCoordinateRows
+      })
+    );
+
+    if (result.services.length === 0) {
+      return DEFAULT_REPLY;
+    }
+
+    const serviceLines = result.services.map((service) => {
+      const location = [service.address, service.area, service.province]
+        .filter(Boolean)
+        .join(" ");
+      const phone = service.phone ? ` โทร ${service.phone}` : "";
+      return `${service.category}: ${service.name} (${service.distanceKm.toFixed(1)} กม.)${location ? ` ที่อยู่ ${location}` : ""}${phone}`;
+    });
+
+    return `จุดช่วยเหลือที่ใกล้ตำแหน่งของคุณที่สุดแยกตามประเภทครับ\n${serviceLines.join("\n")}\n\nระยะทางเป็นเส้นตรง ไม่ใช่ระยะทางตามถนนครับ`;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "nearby_search_error",
+        ...errorDetails(error)
+      })
+    );
+    return DEFAULT_REPLY;
+  }
+}
+
 export async function POST(request: Request): Promise<Response> {
   let signatureValidated = false;
   let pendingReplyToken: string | null = null;
@@ -152,14 +246,28 @@ export async function POST(request: Request): Promise<Response> {
     const deadline = Date.now() + HANDLER_DEADLINE_MS;
 
     for (const event of events) {
-      const textEvent = getTextMessageEvent(event);
-      if (!textEvent) {
+      const messageEvent = getMessageEvent(event);
+      if (!messageEvent) {
         continue;
       }
 
-      pendingReplyToken = textEvent.replyToken;
-      const reply = await createReply(textEvent.text, deadline);
-      await replySafely(textEvent.replyToken, reply);
+      pendingReplyToken = messageEvent.replyToken;
+      let reply: string;
+      if (messageEvent.messageType === "location") {
+        reply = await createNearbyReply(
+          messageEvent.latitude,
+          messageEvent.longitude,
+          deadline
+        );
+      } else if (isUrgentRequest(messageEvent.text)) {
+        reply = URGENT_REPLY_WITH_LOCATION;
+      } else if (isNearbyRequest(messageEvent.text)) {
+        reply = LOCATION_REQUEST_REPLY;
+      } else {
+        reply = await createReply(messageEvent.text, deadline);
+      }
+
+      await replySafely(messageEvent.replyToken, reply);
       pendingReplyToken = null;
     }
 
